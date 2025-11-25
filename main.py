@@ -1,29 +1,39 @@
+# main.py
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
+import os
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Body
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse
 from io import BytesIO
 from typing import List, Optional
+
 from sqlmodel import Session, select
 
+# local imports (make sure these modules exist and exports match)
 from db import create_db, get_session
 from routes_auth import router as auth_router
 from models import User, History
 import ai_utils
 from auth import decode_token
 
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 app = FastAPI(title="Study Companion Backend")
 app.include_router(auth_router)
 
 # ==== CORS ====
-# Only allow the exact origins you're serving the frontend from.
+# Build allowed origins using env FRONTEND_URL plus localhost dev URLs.
 ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
+
+# Add FRONTEND_URL from environment if present
+frontend_url = os.getenv("FRONTEND_URL")
+if frontend_url:
+    ALLOWED_ORIGINS.append(frontend_url.rstrip("/"))
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,6 +41,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
 )
 
 # Create tables on startup
@@ -38,11 +49,15 @@ app.add_middleware(
 def init_db():
     create_db()
 
+
 # Helper dependency: get_current_user from Authorization header (Bearer token)
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 security = HTTPBearer()
 
-def get_current_user(creds: HTTPAuthorizationCredentials = Depends(security), session: Session = Depends(get_session)):
+
+def get_current_user(
+    creds: HTTPAuthorizationCredentials = Depends(security),
+    session: Session = Depends(get_session),
+) -> User:
     token = creds.credentials
     payload = decode_token(token)
     if not payload or payload.get("type") != "access":
@@ -53,19 +68,21 @@ def get_current_user(creds: HTTPAuthorizationCredentials = Depends(security), se
         raise HTTPException(status_code=401, detail="User not found")
     return user
 
+
 # Simple ping root (useful for frontend checks)
 @app.get("/")
 def root():
     return {"ok": True}
 
+
 # PROFILE endpoint
 @app.get("/profile")
 def profile(user: User = Depends(get_current_user), session: Session = Depends(get_session)):
-    # basic stats
-    total_notes = session.exec(select(History).where(History.user_id == user.id, History.feature == "notes")).count()
-    total_flash = session.exec(select(History).where(History.user_id == user.id, History.feature == "flashcards")).count()
-    total_quiz = session.exec(select(History).where(History.user_id == user.id, History.feature == "quiz")).count()
-    total_tutor = session.exec(select(History).where(History.user_id == user.id, History.feature == "tutor")).count()
+    # Use .all() and len() to count (safe and DB-agnostic)
+    total_notes = len(session.exec(select(History).where(History.user_id == user.id, History.feature == "notes")).all())
+    total_flash = len(session.exec(select(History).where(History.user_id == user.id, History.feature == "flashcards")).all())
+    total_quiz = len(session.exec(select(History).where(History.user_id == user.id, History.feature == "quiz")).all())
+    total_tutor = len(session.exec(select(History).where(History.user_id == user.id, History.feature == "tutor")).all())
 
     return {
         "email": user.email,
@@ -78,11 +95,12 @@ def profile(user: User = Depends(get_current_user), session: Session = Depends(g
         }
     }
 
+
 # Log activity (protected)
 @app.post("/activity/log")
-def log_activity(data: dict, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
-    feature = data.get("feature")
-    details = data.get("details", "")
+def log_activity(payload: dict = Body(...), user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    feature = payload.get("feature")
+    details = payload.get("details", "")
     if not feature:
         raise HTTPException(status_code=400, detail="feature required")
     h = History(user_id=user.id, feature=feature, details=details)
@@ -91,33 +109,31 @@ def log_activity(data: dict, user: User = Depends(get_current_user), session: Se
     session.refresh(h)
     return {"status": "ok", "id": h.id}
 
+
 # Get activity history
 @app.get("/activity/history")
 def get_history(limit: int = 20, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
-    q = session.exec(select(History).where(History.user_id == user.id).order_by(History.created_at.desc()).limit(limit)).all()
-    return {"history": [ {"feature": r.feature, "details": r.details, "created_at": r.created_at} for r in q ] }
+    q = session.exec(
+        select(History)
+        .where(History.user_id == user.id)
+        .order_by(History.created_at.desc())
+        .limit(limit)
+    ).all()
+
+    return {"history": [{"feature": r.feature, "details": r.details, "created_at": r.created_at} for r in q]}
+
 
 # Dashboard stats aggregated
 @app.get("/dashboard/stats")
-def dashboard_stats(
-    user: User = Depends(get_current_user),
-    session: Session = Depends(get_session)
-):
-
-    total_entries = session.exec(
-        select(History).where(History.user_id == user.id)
-    ).all()
-
+def dashboard_stats(user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    total_entries = session.exec(select(History).where(History.user_id == user.id)).all()
     FEATURES = ["notes", "quiz", "mindmap", "flashcards", "tutor"]
 
     per_feature = {}
     for f in FEATURES:
-        count = session.exec(
-            select(History).where(History.user_id == user.id, History.feature == f)
-        ).all()
+        count = session.exec(select(History).where(History.user_id == user.id, History.feature == f)).all()
         per_feature[f] = len(count)
 
-    # Get recent 10 records
     recent = session.exec(
         select(History)
         .where(History.user_id == user.id)
@@ -129,38 +145,29 @@ def dashboard_stats(
         "total": len(total_entries),
         "per_feature": per_feature,
         "recent": [
-            {
-                "feature": r.feature,
-                "details": r.details,
-                "created_at": r.created_at
-            }
+            {"feature": r.feature, "details": r.details, "created_at": r.created_at}
             for r in recent
-        ]
+        ],
     }
 
 
 # ===== AI / Utility endpoints (protected) =====
 
-# NOTES generator (already had similar in your code)
+# NOTES generator
 @app.post("/ai/notes")
-def ai_notes(data: dict, session: Session = Depends(get_session), user: User = Depends(get_current_user)):
-    topic = data.get("topic", "")
+def ai_notes(payload: dict = Body(...), session: Session = Depends(get_session), user: User = Depends(get_current_user)):
+    topic = payload.get("topic", "")
     out = ai_utils.generate_notes(topic)
     # log
     h = History(user_id=user.id, feature="notes", details=topic)
-    session.add(h); session.commit()
+    session.add(h)
+    session.commit()
     return {"notes": out}
 
+
 # NOTES -> PDF (download)
-from fastapi import Form, Body
-
-from fastapi import Body
-
 @app.post("/notes/pdf")
-def notes_pdf(
-    payload: dict = Body(...),
-    user: User = Depends(get_current_user)
-):
+def notes_pdf(payload: dict = Body(...), user: User = Depends(get_current_user)):
     title = payload.get("title") or "notes"
     notes = payload.get("notes")
 
@@ -170,70 +177,69 @@ def notes_pdf(
     try:
         pdf_bytes = ai_utils.notes_to_pdf_bytes(title, notes)
     except Exception as e:
-        raise HTTPException(500, f"PDF generation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")
 
-    return StreamingResponse(
-        BytesIO(pdf_bytes),
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="{title}.pdf"',
-            "Access-Control-Expose-Headers": "Content-Disposition"
-        }
-    )
+    headers = {
+        "Content-Disposition": f'attachment; filename="{title}.pdf"',
+        "Access-Control-Expose-Headers": "Content-Disposition",
+    }
+
+    return StreamingResponse(BytesIO(pdf_bytes), media_type="application/pdf", headers=headers)
 
 
-
-# FLASHCARDS (already present)
+# FLASHCARDS
 @app.post("/ai/flashcards")
-def ai_flashcards(data: dict, session: Session = Depends(get_session), user: User = Depends(get_current_user)):
-    topic = data.get("topic", "")
-    count = int(data.get("count", 8))
+def ai_flashcards(payload: dict = Body(...), session: Session = Depends(get_session), user: User = Depends(get_current_user)):
+    topic = payload.get("topic", "")
+    count = int(payload.get("count", 8))
     out = ai_utils.generate_flashcards(topic, count)
     h = History(user_id=user.id, feature="flashcards", details=f"{topic} ({len(out)})")
-    session.add(h); session.commit()
+    session.add(h)
+    session.commit()
     return {"flashcards": out}
+
 
 # STUDY PLAN
 @app.post("/ai/plan")
-def ai_plan(data: dict, session: Session = Depends(get_session), user: User = Depends(get_current_user)):
-    topic = data.get("topic", "")
+def ai_plan(payload: dict = Body(...), session: Session = Depends(get_session), user: User = Depends(get_current_user)):
+    topic = payload.get("topic", "")
     out = ai_utils.generate_plan(topic)
     h = History(user_id=user.id, feature="plan", details=topic)
-    session.add(h); session.commit()
+    session.add(h)
+    session.commit()
     return {"plan": out}
+
 
 # QUIZ
 @app.post("/ai/quiz")
-def ai_quiz(data: dict, session: Session = Depends(get_session), user: User = Depends(get_current_user)):
-    topic = data.get("topic", "")
+def ai_quiz(payload: dict = Body(...), session: Session = Depends(get_session), user: User = Depends(get_current_user)):
+    topic = payload.get("topic", "")
     out = ai_utils.generate_quiz(topic)
-
     h = History(user_id=user.id, feature="quiz", details=topic)
-    session.add(h); session.commit()
-
+    session.add(h)
+    session.commit()
     return {"quiz": out}
+
 
 # MINDMAP from text/topic
 @app.post("/ai/mindmap")
-def ai_mindmap(data: dict, session: Session = Depends(get_session), user: User = Depends(get_current_user)):
-    topic = data.get("topic", "") or data.get("title", "")
-    text = data.get("text", "") or data.get("content", "")
-    # If only topic provided, we will call notes generator to get content snippet OR pass topic as title
+def ai_mindmap(payload: dict = Body(...), session: Session = Depends(get_session), user: User = Depends(get_current_user)):
+    topic = payload.get("topic", "") or payload.get("title", "")
+    text = payload.get("text", "") or payload.get("content", "")
     if not text:
-        # try generating notes and pass as content
         notes = ai_utils.generate_notes(topic or "")
         text = notes
     mindmap = ai_utils.generate_mindmap_from_text(topic or "Mindmap", text)
     h = History(user_id=user.id, feature="mindmap", details=topic or "upload/text")
-    session.add(h); session.commit()
+    session.add(h)
+    session.commit()
     return {"mindmap": mindmap}
+
 
 # Upload PDF -> extract text -> generate mindmap
 @app.post("/ai/mindmap/upload")
 async def ai_mindmap_upload(file: UploadFile = File(...), session: Session = Depends(get_session), user: User = Depends(get_current_user)):
-    # Accept PDF file, extract text, then generate mindmap
     contents = await file.read()
-    # write to a temp file-like object for extraction
     try:
         import io
         buf = io.BytesIO(contents)
@@ -242,16 +248,19 @@ async def ai_mindmap_upload(file: UploadFile = File(...), session: Session = Dep
             raise ValueError("PDF text extraction returned empty.")
         mindmap = ai_utils.generate_mindmap_from_text(file.filename or "uploaded", text)
         h = History(user_id=user.id, feature="mindmap", details=f"uploaded:{file.filename}")
-        session.add(h); session.commit()
+        session.add(h)
+        session.commit()
         return {"mindmap": mindmap}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Upload or processing failed: {str(e)}")
 
+
 # TUTOR (chat)
 @app.post("/ai/tutor")
-def ai_tutor(data: dict, session: Session = Depends(get_session), user: User = Depends(get_current_user)):
-    message = data.get("message", "")
+def ai_tutor(payload: dict = Body(...), session: Session = Depends(get_session), user: User = Depends(get_current_user)):
+    message = payload.get("message", "")
     reply = ai_utils.chat_with_tutor(message)
     h = History(user_id=user.id, feature="tutor", details=message[:200])
-    session.add(h); session.commit()
+    session.add(h)
+    session.commit()
     return {"reply": reply}

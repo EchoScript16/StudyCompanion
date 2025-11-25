@@ -2,36 +2,27 @@
 import os
 from sqlmodel import SQLModel, create_engine, Session
 
-# ─────────────────────────────────────────────────────────────
-# Detect database from environment variable (for deployment)
-# If DATABASE_URL not provided, fall back to local SQLite
-# ─────────────────────────────────────────────────────────────
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///study.db")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./study.db")
 
-# Special handling for SQLite (required by SQLModel)
-connect_args = {}
-if DATABASE_URL.startswith("sqlite"):
-    connect_args = {"check_same_thread": False}
+# Fix Render's postgres:// → postgresql://
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-# ─────────────────────────────────────────────────────────────
-# Create engine (works for SQLite & Postgres)
-# ─────────────────────────────────────────────────────────────
+# Create engine
 engine = create_engine(
     DATABASE_URL,
     echo=False,
-    connect_args=connect_args,
-    pool_pre_ping=True
+    future=True
 )
 
-# ─────────────────────────────────────────────────────────────
-# Session generator  
-# ─────────────────────────────────────────────────────────────
+
+# Create DB Tables
+def create_db():
+    from models import User, History, RefreshToken
+    SQLModel.metadata.create_all(engine)
+
+
+# Dependency: SQLModel Session
 def get_session():
     with Session(engine) as session:
         yield session
-
-# ─────────────────────────────────────────────────────────────
-# Create all tables
-# ─────────────────────────────────────────────────────────────
-def create_db():
-    SQLModel.metadata.create_all(engine)
