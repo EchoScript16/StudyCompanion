@@ -1,0 +1,80 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Root neon palette for style B */
+:root{
+  --bg-1: #071024;
+  --bg-2: #0f1230;
+  --panel: rgba(255,255,255,0.03);
+  --neon-c1: #7c5cff;
+  --neon-c2: #00e6c3;
+  --neon-c3: #ff5c7c;
+}
+
+/* page background */
+body{
+  @apply bg-gradient-to-bl from-[#050217] via-[#081030] to-[#06101f] text-white min-h-screen;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+}
+
+/* container panel */
+.app-panel {
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  border-radius: 12px;
+  padding: 18px;
+  box-shadow: 0 8px 30px rgba(2, 6, 23, 0.6), inset 0 1px 0 rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.03);
+  backdrop-filter: blur(6px);
+}
+
+/* neon heading */
+.neon-title {
+  background-image: linear-gradient(90deg, var(--neon-c1), var(--neon-c2) 40%, var(--neon-c3));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-weight: 700;
+}
+
+/* button neon */
+.btn-neon {
+  background: linear-gradient(90deg, rgba(124,92,255,0.12), rgba(0,230,195,0.08));
+  border: 1px solid rgba(124,92,255,0.28);
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  color: white;
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+.btn-neon:hover { transform: translateY(-3px); box-shadow: 0 8px 30px rgba(124,92,255,0.12); }
+
+/* small badges */
+.badge {
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02));
+  border: 1px solid rgba(255,255,255,0.02);
+}
+
+/* skeleton shimmer */
+.skeleton {
+  background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.01) 37%, rgba(255,255,255,0.03) 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.6s linear infinite;
+  border-radius: 8px;
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* fade in transitions */
+.fade-in { animation: fadeIn .28s ease both; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px);} to { opacity: 1; transform: translateY(0);} }
+
+/* responsive tweaks */
+@media (max-width: 768px){
+  aside { display: none; }
+  .app-panel { padding: 12px; border-radius: 10px; }
+}
