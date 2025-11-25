@@ -2,17 +2,23 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
+# Try psycopg2 normally
+try:
+    import psycopg2
+except ImportError:
+    psycopg2 = None
+
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./study.db")
 
-# fix for Render postgres URLs
+# Fix deprecated URL from Render ("postgres://" → "postgresql://")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
+# Always use the default driver "psycopg2" (NOT psycopg2_binary)
 engine = create_engine(
     DATABASE_URL,
     echo=False,
-    future=True,
-    pool_pre_ping=True
+    future=True
 )
 
 SessionLocal = sessionmaker(
@@ -23,8 +29,6 @@ SessionLocal = sessionmaker(
 
 Base = declarative_base()
 
-def create_db():
-    Base.metadata.create_all(bind=engine)
 
 def get_session():
     db = SessionLocal()
@@ -32,3 +36,7 @@ def get_session():
         yield db
     finally:
         db.close()
+
+
+def create_db():
+    Base.metadata.create_all(bind=engine)
