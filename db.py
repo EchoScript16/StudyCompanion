@@ -1,28 +1,34 @@
-# db.py
 import os
-from sqlmodel import SQLModel, create_engine, Session
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./study.db")
 
-# Fix Render's postgres:// → postgresql://
+# fix for Render postgres URLs
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-# Create engine
 engine = create_engine(
     DATABASE_URL,
     echo=False,
-    future=True
+    future=True,
+    pool_pre_ping=True
 )
 
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine
+)
 
-# Create DB Tables
+Base = declarative_base()
+
 def create_db():
-    from models import User, History, RefreshToken
-    SQLModel.metadata.create_all(engine)
+    Base.metadata.create_all(bind=engine)
 
-
-# Dependency: SQLModel Session
 def get_session():
-    with Session(engine) as session:
-        yield session
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
