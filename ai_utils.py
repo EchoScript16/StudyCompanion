@@ -1,10 +1,12 @@
-# ai_utils.py
 import os
 import json
-import tempfile
-import PyPDF2
+from io import BytesIO
+from dotenv import load_dotenv
 from groq import Groq
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
 
+load_dotenv()
 
 # ============================================================
 # GROQ CLIENT
@@ -12,23 +14,20 @@ from groq import Groq
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 if not GROQ_API_KEY:
-    raise ValueError("❌ GROQ_API_KEY not found. Add it to your .env file.")
+    raise ValueError("❌ GROQ_API_KEY missing in .env")
 
-# Initialize Groq client
 client = Groq(api_key=GROQ_API_KEY)
-
-MODEL = "llama-3.1-8b-instant"   # Fast + Free
+MODEL = "llama-3.1-8b-instant"   # Fast + good output
 
 
 # ============================================================
-# INTERNAL CALL WRAPPER
+# SAFE GROQ CALL WRAPPER
 # ============================================================
 def _call_groq(prompt: str, max_tokens: int = 3000):
-    """Internal safe wrapper for Groq API."""
     try:
         resp = client.chat.completions.create(
             model=MODEL,
-            temperature=0.3,
+            temperature=0.2,
             max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -44,40 +43,34 @@ def generate_notes(topic: str):
     prompt = f"""
 Generate detailed, high-quality study notes for **{topic}**.
 
-FORMAT STRICTLY:
+Follow EXACT format:
 
 # {topic}
 
 ## 1. Introduction  
 - Clear background  
-- Why is this topic important  
+- Why important  
 
-## 2. Key Concepts (Detailed Explanation)  
-- Use bullet points  
-- Include formulas, definitions, diagrams (ASCII)
+## 2. Key Concepts  
+- Bullet points  
+- Definitions  
+- Diagrams (ASCII)
 
 ## 3. Examples  
-- At least 3 real exam-level examples  
-- Show solutions step-by-step  
+- 3 exam-level examples with solutions  
 
-## 4. Table Summary  
-- Create a helpful comparison table  
+## 4. Summary Table  
+- A comparison table  
 
-## 5. ASCII Diagram  
-- Provide flowchart / architecture / steps  
+## 5. Diagram  
+- ASCII Flowchart  
 
-## 6. Real-life Applications  
+## 6. Applications  
 
-## 7. Exam-oriented Short Notes  
-- Bullet points  
-- Must be crisp and useful for revision  
+## 7. Exam Revision Notes  
+- Crisp, bullet points
 
-## 8. Keywords / Important Terms  
-
-Make it:
-- Long and structured  
-- Very student-friendly  
-- Easy to understand  
+Write in student-friendly language.
 """
     return _call_groq(prompt)
 
@@ -87,11 +80,13 @@ Make it:
 # ============================================================
 def generate_plan(topic: str):
     prompt = f"""
-Create a structured study plan for **{topic}**:
-- Hour-by-hour schedule
-- Pomodoro cycles
-- Breaks
-- Revision strategy
+Create a fully structured study plan for **{topic}**.
+
+Required sections:
+- Daily timetable
+- Pomodoro schedule
+- Weekly revision plan
+- Exam strategy
 - Final summary
 """
     return _call_groq(prompt)
@@ -102,15 +97,15 @@ Create a structured study plan for **{topic}**:
 # ============================================================
 def answer_question(question: str):
     prompt = f"""
-Answer this question clearly and simply:
+Explain the answer step-by-step:
 
-{question}
+Question: {question}
 
-FORMAT:
-1. Direct Answer
-2. Step-by-step Breakdown
-3. Simple Example
-4. One-line Summary
+Required output:
+1. Direct answer  
+2. Explanation  
+3. Example  
+4. One-line summary  
 """
     return _call_groq(prompt)
 
@@ -120,64 +115,47 @@ FORMAT:
 # ============================================================
 def generate_quiz(topic: str):
     prompt = f"""
-Generate a high-quality MCQ quiz for the topic **{topic}**.
+Generate a 10-question MCQ quiz on **{topic}**.
 
-Return STRICT JSON only:
+Return STRICT JSON ONLY:
 
 [
   {{
-    "q": "question text",
+    "q": "question?",
     "options": {{
-        "A": "option text",
-        "B": "option text",
-        "C": "option text",
-        "D": "option text"
+      "A": "",
+      "B": "",
+      "C": "",
+      "D": ""
     }},
     "answer": "A",
-    "explanation": "explain why this is correct"
+    "explanation": ""
   }}
 ]
-
-Rules:
-- Generate EXACTLY 10 questions.
-- Ensure only one correct answer.
-- DO NOT add anything outside JSON.
 """
     text = _call_groq(prompt)
 
     try:
-        start = text.find("[")
-        end = text.rfind("]") + 1
-        raw = json.loads(text[start:end])
+        text = text[text.index("[") : text.rindex("]") + 1]
+        raw = json.loads(text)
     except:
-        return [{
-            "q": "Quiz parsing error.",
-            "options": ["", "", "", ""],
-            "answer": 0,
-            "explanation": ""
-        }]
+        return [{"q": "Quiz Error", "options": ["", "", "", ""], "answer": 0, "explanation": ""}]
 
-    fixed_quiz = []
+    quiz = []
     for q in raw:
         opts = q.get("options", {})
-        options_list = [
-            opts.get("A", ""),
-            opts.get("B", ""),
-            opts.get("C", ""),
-            opts.get("D", "")
-        ]
-
-        correct_letter = q.get("answer", "A").strip()
-        correct_index = "ABCD".index(correct_letter) if correct_letter in "ABCD" else 0
-
-        fixed_quiz.append({
+        quiz.append({
             "q": q.get("q", ""),
-            "options": options_list,
-            "answer": correct_index,
+            "options": [
+                opts.get("A", ""),
+                opts.get("B", ""),
+                opts.get("C", ""),
+                opts.get("D", ""),
+            ],
+            "answer": "ABCD".index(q.get("answer", "A")),
             "explanation": q.get("explanation", "")
         })
-
-    return fixed_quiz
+    return quiz
 
 
 # ============================================================
@@ -189,104 +167,108 @@ Generate {count} flashcards for **{topic}**.
 
 Return JSON ONLY:
 [
-  {{"q":"", "a":""}}
+  {{"q": "", "a": ""}}
 ]
 """
     text = _call_groq(prompt)
 
     try:
-        start = text.find("[")
-        end = text.rfind("]") + 1
-        return json.loads(text[start:end])
+        text = text[text.index("[") : text.rindex("]") + 1]
+        return json.loads(text)
     except:
         return [{"q": f"What is {topic}?", "a": "Definition"}]
 
 
 # ============================================================
-# 6) MINDMAP FROM TEXT
+# 6) MINDMAP GENERATOR (IMPROVED)
 # ============================================================
 def generate_mindmap_from_text(title: str, text: str):
     prompt = f"""
-Create a mindmap for the following content:
+Create a hierarchical mindmap for this text:
 
 {text[:2000]}
 
-RETURN JSON:
+Return STRICT JSON ONLY:
+
 {{
- "title": "",
- "ascii": "",
- "nodes": []
+  "title": "{title}",
+  "children": [
+    {{
+      "title": "Subtopic",
+      "children": [
+         "point1",
+         "point2"
+      ]
+    }}
+  ]
 }}
+No extra text. No explanation.
 """
     resp = _call_groq(prompt)
 
     try:
-        start = resp.find("{")
-        return json.loads(resp[start:])
+        resp = resp[resp.index("{") : resp.rindex("}") + 1]
+        return json.loads(resp)
     except:
         return {
             "title": title,
-            "ascii": f"{title}\n |\\\n A  B  C",
-            "nodes": []
+            "children": [
+                {"title": "Mindmap generation failed", "children": []}
+            ]
         }
 
 
 # ============================================================
 # 7) PDF → TEXT
 # ============================================================
+import PyPDF2
 def extract_pdf_text(file):
     try:
         reader = PyPDF2.PdfReader(file)
         text = ""
-        for p in reader.pages:
-            if p.extract_text():
-                text += p.extract_text() + "\n"
+        for page in reader.pages:
+            if page.extract_text():
+                text += page.extract_text() + "\n"
         return text.strip()
     except:
         return ""
 
 
 # ============================================================
-# 8) TEXT → PDF
+# 8) TEXT → PDF (Improved)
 # ============================================================
 def notes_to_pdf_bytes(title: str, notes_text: str):
-    from reportlab.pdfgen import canvas
-    from reportlab.lib.pagesizes import A4
+    """Generate PDF and return bytes directly (no temp files)."""
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=letter)
 
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-    path = tmp.name
-    tmp.close()
+    pdf.setTitle(title)
+    width, height = letter
+    y = height - 50
 
-    c = canvas.Canvas(path, pagesize=A4)
-    width, height = A4
-    y = height - 60
-
-    c.setFont("Helvetica-Bold", 18)
-    c.drawString(40, y, title)
+    pdf.setFont("Helvetica-Bold", 18)
+    pdf.drawString(40, y, title)
     y -= 30
 
-    c.setFont("Helvetica", 11)
+    pdf.setFont("Helvetica", 11)
     for line in notes_text.splitlines():
-        if y < 50:
-            c.showPage()
-            y = height - 60
-            c.setFont("Helvetica", 11)
+        if y < 40:
+            pdf.showPage()
+            pdf.setFont("Helvetica", 11)
+            y = height - 50
 
+        # wrap long lines
         while len(line) > 95:
-            c.drawString(40, y, line[:95])
+            pdf.drawString(40, y, line[:95])
             line = line[95:]
             y -= 14
 
-        c.drawString(40, y, line)
+        pdf.drawString(40, y, line)
         y -= 14
 
-    c.save()
-
-    with open(path, "rb") as f:
-        pdf = f.read()
-
-    os.unlink(path)
-    return pdf
+    pdf.save()
+    buffer.seek(0)
+    return buffer.getvalue()
 
 
 # ============================================================
@@ -294,7 +276,7 @@ def notes_to_pdf_bytes(title: str, notes_text: str):
 # ============================================================
 def chat_with_tutor(message: str):
     prompt = f"""
-You are a friendly AI tutor. Explain simply and step-by-step.
+You are a very friendly AI tutor. Explain concepts simply.
 
 User: {message}
 """

@@ -1,4 +1,6 @@
-# backend/main.py
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -9,8 +11,9 @@ from sqlmodel import Session, select
 from db import create_db, get_session
 from routes_auth import router as auth_router
 from models import User, History
-import ai_utils  # your ai_utils (generate_notes etc.)
-from auth import decode_token  # helper to decode tokens
+import ai_utils
+from auth import decode_token
+
 
 app = FastAPI(title="Study Companion Backend")
 app.include_router(auth_router)
@@ -151,20 +154,33 @@ def ai_notes(data: dict, session: Session = Depends(get_session), user: User = D
 # NOTES -> PDF (download)
 from fastapi import Form, Body
 
+from fastapi import Body
+
 @app.post("/notes/pdf")
-def notes_pdf(data: dict, user: User = Depends(get_current_user)):
-    title = data.get("title") or "notes"
-    notes = data.get("notes")
+def notes_pdf(
+    payload: dict = Body(...),
+    user: User = Depends(get_current_user)
+):
+    title = payload.get("title") or "notes"
+    notes = payload.get("notes")
 
     if not notes:
         raise HTTPException(status_code=400, detail="notes required")
 
-    pdf_bytes = ai_utils.notes_to_pdf_bytes(title, notes)
+    try:
+        pdf_bytes = ai_utils.notes_to_pdf_bytes(title, notes)
+    except Exception as e:
+        raise HTTPException(500, f"PDF generation failed: {e}")
+
     return StreamingResponse(
         BytesIO(pdf_bytes),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{title}.pdf"'}
+        headers={
+            "Content-Disposition": f'attachment; filename="{title}.pdf"',
+            "Access-Control-Expose-Headers": "Content-Disposition"
+        }
     )
+
 
 
 # FLASHCARDS (already present)
