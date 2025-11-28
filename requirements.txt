@@ -11,6 +11,5 @@ Pillow==10.4.0
 
 python-jose==3.3.0
 passlib[bcrypt]==1.7.4
-
-groq==0.4.2     # ← FIXED
+   
 pg8000==1.29.8  # ← For Postgres

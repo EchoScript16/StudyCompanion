@@ -5,6 +5,10 @@ services:
     envVars:
       - key: GROQ_API_KEY
         sync: false
-    buildCommand: "pip install -r requirements.txt"
+    buildCommand: |
+      pip install --upgrade pip
+      pip uninstall -y groq || true
+      pip install groq==0.5.0
+      pip install -r requirements.txt
     startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
     plan: free
