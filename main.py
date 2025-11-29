@@ -27,7 +27,7 @@ app.include_router(auth_router)
 # Build allowed origins using env FRONTEND_URL plus localhost dev URLs.
 ALLOWED_ORIGINS = [
     "http://localhost:5173",
-    "http://127.0.0.1:5173",
+    "https://studycompanion-zcww.onrender.com",
 ]
 
 # Add FRONTEND_URL from environment if present
@@ -41,6 +41,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_origins = ["*"],
     expose_headers=["Content-Disposition"],
 )
 
