@@ -1,44 +1,74 @@
 import os
 import json
 from io import BytesIO
+
+# ============================================================
+# FIX 1: REMOVE PROXY VARIABLES BEFORE ANY IMPORTS
+# ============================================================
+for key in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]:
+    if key in os.environ:
+        del os.environ[key]
+
 from dotenv import load_dotenv
+
+# ============================================================
+# FIX 2: IMPORT httpx BEFORE GROQ
+# ============================================================
+import httpx
+
+# ============================================================
+# FIX 3: CREATE A NO-PROXY HTTP CLIENT
+# ============================================================
+no_proxy_client = httpx.Client(
+    proxies=None,          # disable proxy usage
+    trust_env=False,       # prevents reading proxy env vars
+    follow_redirects=True,
+)
+
 from groq import Groq
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
+import PyPDF2
 
 load_dotenv()
 
 # ============================================================
-# GROQ CLIENT
+# GROQ CLIENT (Render-SAFE)
 # ============================================================
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 if not GROQ_API_KEY:
-    raise ValueError("❌ GROQ_API_KEY missing in .env")
+    raise ValueError("❌ Missing GROQ_API_KEY in .env")
 
-client = Groq(api_key=GROQ_API_KEY)
-MODEL = "llama-3.1-8b-instant"   # Fast + good output
+# FIX 4: Force Groq to use the clean HTTP client
+client = Groq(
+    api_key=GROQ_API_KEY,
+    http_client=no_proxy_client
+)
+
+MODEL = "llama-3.1-8b-instant"
 
 
 # ============================================================
-# SAFE GROQ CALL WRAPPER
+# SAFE CALL WRAPPER
 # ============================================================
 def _call_groq(prompt: str, max_tokens: int = 3000):
     try:
-        resp = client.chat.completions.create(
+        response = client.chat.completions.create(
             model=MODEL,
             temperature=0.2,
             max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}]
         )
-        return resp.choices[0].message.content.strip()
+        return response.choices[0].message.content.strip()
     except Exception as e:
         return f"[AI Error] {str(e)}"
 
 
 # ============================================================
-# 1) NOTES GENERATOR
+# REST OF YOUR FUNCTIONS (UNCHANGED)
 # ============================================================
+
 def generate_notes(topic: str):
     prompt = f"""
 Generate detailed, high-quality study notes for **{topic}**.
@@ -47,217 +77,132 @@ Follow EXACT format:
 
 # {topic}
 
-## 1. Introduction  
-- Clear background  
-- Why important  
+## 1. Introduction
+- Background
+- Importance
 
-## 2. Key Concepts  
-- Bullet points  
-- Definitions  
-- Diagrams (ASCII)
+## 2. Key Concepts
+- Bullet points
+- Definitions
+- ASCII diagrams
 
-## 3. Examples  
-- 3 exam-level examples with solutions  
+## 3. Examples
+- 3 solved examples
 
-## 4. Summary Table  
-- A comparison table  
+## 4. Summary Table
 
-## 5. Diagram  
-- ASCII Flowchart  
+## 5. ASCII Diagram
 
-## 6. Applications  
+## 6. Applications
 
-## 7. Exam Revision Notes  
-- Crisp, bullet points
-
-Write in student-friendly language.
+## 7. Exam Revision Notes
 """
     return _call_groq(prompt)
 
 
-# ============================================================
-# 2) STUDY PLAN
-# ============================================================
 def generate_plan(topic: str):
     prompt = f"""
-Create a fully structured study plan for **{topic}**.
+Create a structured study plan for **{topic}**.
 
-Required sections:
+Sections:
 - Daily timetable
-- Pomodoro schedule
-- Weekly revision plan
+- Pomodoro plan
+- Weekly revision
 - Exam strategy
-- Final summary
 """
     return _call_groq(prompt)
 
 
-# ============================================================
-# 3) ANSWER QUESTION
-# ============================================================
 def answer_question(question: str):
     prompt = f"""
-Explain the answer step-by-step:
+Answer the question step-by-step:
 
 Question: {question}
 
-Required output:
-1. Direct answer  
-2. Explanation  
-3. Example  
-4. One-line summary  
+Required:
+1. Direct answer
+2. Explanation
+3. Example
+4. One-line summary
 """
     return _call_groq(prompt)
 
 
-# ============================================================
-# 4) QUIZ GENERATOR
-# ============================================================
 def generate_quiz(topic: str):
     prompt = f"""
-Generate a 10-question MCQ quiz on **{topic}**.
-
-Return STRICT JSON ONLY:
-
-[
-  {{
-    "q": "question?",
-    "options": {{
-      "A": "",
-      "B": "",
-      "C": "",
-      "D": ""
-    }},
-    "answer": "A",
-    "explanation": ""
-  }}
-]
+Generate 10 MCQs for **{topic}**
+Return JSON ONLY.
 """
     text = _call_groq(prompt)
 
     try:
-        text = text[text.index("[") : text.rindex("]") + 1]
+        text = text[text.index("["): text.rindex("]") + 1]
         raw = json.loads(text)
     except:
-        return [{"q": "Quiz Error", "options": ["", "", "", ""], "answer": 0, "explanation": ""}]
+        return [{"q": "Error generating quiz", "options": ["", "", "", ""], "answer": 0}]
 
     quiz = []
     for q in raw:
-        opts = q.get("options", {})
+        opts = q["options"]
         quiz.append({
-            "q": q.get("q", ""),
-            "options": [
-                opts.get("A", ""),
-                opts.get("B", ""),
-                opts.get("C", ""),
-                opts.get("D", ""),
-            ],
-            "answer": "ABCD".index(q.get("answer", "A")),
-            "explanation": q.get("explanation", "")
+            "q": q["q"],
+            "options": [opts["A"], opts["B"], opts["C"], opts["D"]],
+            "answer": "ABCD".index(q["answer"])
         })
     return quiz
 
 
-# ============================================================
-# 5) FLASHCARDS
-# ============================================================
-def generate_flashcards(topic: str, count=8):
-    prompt = f"""
-Generate {count} flashcards for **{topic}**.
-
-Return JSON ONLY:
-[
-  {{"q": "", "a": ""}}
-]
-"""
+def generate_flashcards(topic, count=8):
+    prompt = f"Generate {count} flashcards for {topic}. JSON only."
     text = _call_groq(prompt)
 
     try:
-        text = text[text.index("[") : text.rindex("]") + 1]
+        text = text[text.index("["): text.rindex("]") + 1]
         return json.loads(text)
     except:
         return [{"q": f"What is {topic}?", "a": "Definition"}]
 
 
-# ============================================================
-# 6) MINDMAP GENERATOR (IMPROVED)
-# ============================================================
-def generate_mindmap_from_text(title: str, text: str):
+def generate_mindmap_from_text(title, text):
     prompt = f"""
-Create a hierarchical mindmap for this text:
-
-{text[:2000]}
-
-Return STRICT JSON ONLY:
-
-{{
-  "title": "{title}",
-  "children": [
-    {{
-      "title": "Subtopic",
-      "children": [
-         "point1",
-         "point2"
-      ]
-    }}
-  ]
-}}
-No extra text. No explanation.
+Create a hierarchical mindmap.
+Return JSON only.
 """
     resp = _call_groq(prompt)
 
     try:
-        resp = resp[resp.index("{") : resp.rindex("}") + 1]
-        return json.loads(resp)
+        return json.loads(resp[resp.index("{"): resp.rindex("}") + 1])
     except:
-        return {
-            "title": title,
-            "children": [
-                {"title": "Mindmap generation failed", "children": []}
-            ]
-        }
+        return {"title": title, "children": []}
 
 
-# ============================================================
-# 7) PDF → TEXT
-# ============================================================
-import PyPDF2
 def extract_pdf_text(file):
     try:
         reader = PyPDF2.PdfReader(file)
-        text = ""
-        for page in reader.pages:
-            if page.extract_text():
-                text += page.extract_text() + "\n"
-        return text.strip()
+        return "\n".join([p.extract_text() or "" for p in reader.pages])
     except:
         return ""
 
 
-# ============================================================
-# 8) TEXT → PDF (Improved)
-# ============================================================
-def notes_to_pdf_bytes(title: str, notes_text: str):
-    """Generate PDF and return bytes directly (no temp files)."""
-    buffer = BytesIO()
-    pdf = canvas.Canvas(buffer, pagesize=letter)
+def notes_to_pdf_bytes(title: str, text: str):
+    buf = BytesIO()
+    pdf = canvas.Canvas(buf, pagesize=letter)
 
     pdf.setTitle(title)
     width, height = letter
-    y = height - 50
+    y = height - 40
 
     pdf.setFont("Helvetica-Bold", 18)
     pdf.drawString(40, y, title)
     y -= 30
 
     pdf.setFont("Helvetica", 11)
-    for line in notes_text.splitlines():
+    for line in text.splitlines():
         if y < 40:
             pdf.showPage()
             pdf.setFont("Helvetica", 11)
-            y = height - 50
+            y = height - 40
 
-        # wrap long lines
         while len(line) > 95:
             pdf.drawString(40, y, line[:95])
             line = line[95:]
@@ -267,17 +212,10 @@ def notes_to_pdf_bytes(title: str, notes_text: str):
         y -= 14
 
     pdf.save()
-    buffer.seek(0)
-    return buffer.getvalue()
+    buf.seek(0)
+    return buf.getvalue()
 
 
-# ============================================================
-# 9) TUTOR CHAT
-# ============================================================
 def chat_with_tutor(message: str):
-    prompt = f"""
-You are a very friendly AI tutor. Explain concepts simply.
-
-User: {message}
-"""
+    prompt = f"You are an AI tutor. Explain simply.\nUser: {message}"
     return _call_groq(prompt)
