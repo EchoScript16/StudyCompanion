@@ -1,4 +1,4 @@
-# main.py
+# backend/main.py
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -9,9 +9,10 @@ from fastapi.responses import StreamingResponse
 from io import BytesIO
 from typing import List, Optional
 
-from sqlmodel import Session, select
+# Use SQLAlchemy Session (your db.py exposes a SQLAlchemy sessionmaker)
+from sqlalchemy.orm import Session
 
-# local imports (make sure these modules exist and exports match)
+# local imports
 from db import create_db, get_session
 from routes_auth import router as auth_router
 from models import User, History
@@ -24,16 +25,12 @@ app = FastAPI(title="Study Companion Backend")
 app.include_router(auth_router)
 
 # ==== CORS ====
-# Build allowed origins using env FRONTEND_URL plus localhost dev URLs.
-
-
 ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "https://studyai-ap6z.onrender.com",
     "https://studycompanion-zcww.onrender.com",
 ]
 
-# Add FRONTEND_URL from environment if present
 frontend_url = os.getenv("FRONTEND_URL")
 if frontend_url:
     ALLOWED_ORIGINS.append(frontend_url.rstrip("/"))
@@ -44,6 +41,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
 )
 
 # Create tables on startup
@@ -65,7 +63,8 @@ def get_current_user(
     if not payload or payload.get("type") != "access":
         raise HTTPException(status_code=401, detail="Invalid access token")
     email = payload.get("email")
-    user = session.exec(select(User).where(User.email == email)).first()
+    # Use SQLAlchemy queries (session is SQLAlchemy Session)
+    user = session.query(User).filter(User.email == email).first()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     return user
@@ -80,11 +79,11 @@ def root():
 # PROFILE endpoint
 @app.get("/profile")
 def profile(user: User = Depends(get_current_user), session: Session = Depends(get_session)):
-    # Use .all() and len() to count (safe and DB-agnostic)
-    total_notes = len(session.exec(select(History).where(History.user_id == user.id, History.feature == "notes")).all())
-    total_flash = len(session.exec(select(History).where(History.user_id == user.id, History.feature == "flashcards")).all())
-    total_quiz = len(session.exec(select(History).where(History.user_id == user.id, History.feature == "quiz")).all())
-    total_tutor = len(session.exec(select(History).where(History.user_id == user.id, History.feature == "tutor")).all())
+    # Use SQLAlchemy queries and len() on lists
+    total_notes = len(session.query(History).filter(History.user_id == user.id, History.feature == "notes").all())
+    total_flash = len(session.query(History).filter(History.user_id == user.id, History.feature == "flashcards").all())
+    total_quiz = len(session.query(History).filter(History.user_id == user.id, History.feature == "quiz").all())
+    total_tutor = len(session.query(History).filter(History.user_id == user.id, History.feature == "tutor").all())
 
     return {
         "email": user.email,
@@ -115,33 +114,22 @@ def log_activity(payload: dict = Body(...), user: User = Depends(get_current_use
 # Get activity history
 @app.get("/activity/history")
 def get_history(limit: int = 20, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
-    q = session.exec(
-        select(History)
-        .where(History.user_id == user.id)
-        .order_by(History.created_at.desc())
-        .limit(limit)
-    ).all()
-
+    q = session.query(History).filter(History.user_id == user.id).order_by(History.created_at.desc()).limit(limit).all()
     return {"history": [{"feature": r.feature, "details": r.details, "created_at": r.created_at} for r in q]}
 
 
 # Dashboard stats aggregated
 @app.get("/dashboard/stats")
 def dashboard_stats(user: User = Depends(get_current_user), session: Session = Depends(get_session)):
-    total_entries = session.exec(select(History).where(History.user_id == user.id)).all()
+    total_entries = session.query(History).filter(History.user_id == user.id).all()
     FEATURES = ["notes", "quiz", "mindmap", "flashcards", "tutor"]
 
     per_feature = {}
     for f in FEATURES:
-        count = session.exec(select(History).where(History.user_id == user.id, History.feature == f)).all()
+        count = session.query(History).filter(History.user_id == user.id, History.feature == f).all()
         per_feature[f] = len(count)
 
-    recent = session.exec(
-        select(History)
-        .where(History.user_id == user.id)
-        .order_by(History.created_at.desc())
-        .limit(10)
-    ).all()
+    recent = session.query(History).filter(History.user_id == user.id).order_by(History.created_at.desc()).limit(10).all()
 
     return {
         "total": len(total_entries),
