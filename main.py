@@ -3,28 +3,21 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Body
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from io import BytesIO
-from typing import List, Optional
-
-# Use SQLAlchemy Session (your db.py exposes a SQLAlchemy sessionmaker)
-from sqlalchemy.orm import Session
 
 # local imports
-from db import create_db, get_session
 from routes_auth import router as auth_router
-from models import User, History
-import ai_utils
-from auth import decode_token
+from db import create_db
 
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-
+# ---------------------------
+# INIT FASTAPI
+# ---------------------------
 app = FastAPI(title="Study Companion Backend")
-app.include_router(auth_router)
 
-# ==== CORS ====
+# ---------------------------
+# FIXED CORS (APPLY BEFORE ROUTERS)
+# ---------------------------
 ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "https://studyai-ap6z.onrender.com",
@@ -41,13 +34,21 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["Content-Disposition"],
 )
 
-# Create tables on startup
+# ---------------------------
+# NOW include routers (after CORS)
+# ---------------------------
+app.include_router(auth_router)
+
+
+# ---------------------------
+# DATABASE INIT
+# ---------------------------
 @app.on_event("startup")
 def init_db():
     create_db()
+
 
 
 # Helper dependency: get_current_user from Authorization header (Bearer token)
