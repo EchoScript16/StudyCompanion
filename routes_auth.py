@@ -16,7 +16,7 @@ def login(data: LoginData, session: Session = Depends(get_session)):
     print("Email:", data.email)
     print("Password:", data.password)
 
-    user = session.exec(select(User).where(User.email == data.email)).first()
+    user = session.query(User).filter(User.email == data.email).first()
     print("User exists:", bool(user))
 
     if not user:
@@ -55,9 +55,8 @@ def login(data: LoginData, session: Session = Depends(get_session)):
 def register(data: LoginData, session: Session = Depends(get_session)):
 
     # 1. Check for duplicates
-    existing = session.exec(
-        select(User).where(User.email == data.email)
-    ).first()
+    existing = session.query(User).filter(User.email == data.email).first()
+
 
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")

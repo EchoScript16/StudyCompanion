@@ -35,7 +35,7 @@ def create_refresh_token(data: Dict, expires_days: Optional[int] = None):
     token = jwt.encode(to_encode, JWT_SECRET, algorithm=ALGORITHM)
     # store in DB
     with Session(engine) as session:
-        user = session.exec(select(User).where(User.email == data.get("email"))).first()
+        user = session.query(User).filter(User.email == data.email).first()
         if user:
             r = RefreshToken(user_id=user.id, token=token, expires_at=expire)
             session.add(r)

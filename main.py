@@ -25,10 +25,7 @@ app.include_router(auth_router)
 
 # ==== CORS ====
 # Build allowed origins using env FRONTEND_URL plus localhost dev URLs.
-ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "https://studycompanion-zcww.onrender.com",
-]
+
 
 # Add FRONTEND_URL from environment if present
 frontend_url = os.getenv("FRONTEND_URL")
@@ -37,7 +34,9 @@ if frontend_url:
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # allow all (only for development)
+    allow_origins=[
+        "*",  # allow ALL origins (temporary fix)
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
