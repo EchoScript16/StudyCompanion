@@ -5,6 +5,9 @@ load_dotenv()
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+security = HTTPBearer()
+
 
 # local imports
 from routes_auth import router as auth_router
@@ -52,7 +55,7 @@ def init_db():
 
 
 # Helper dependency: get_current_user from Authorization header (Bearer token)
-security = HTTPBearer()
+
 
 
 def get_current_user(
