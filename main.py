@@ -64,8 +64,13 @@ app.include_router(auth_router)
 # DATABASE INIT
 # ===============================
 @app.on_event("startup")
-def init_db():
-    create_db()
+def startup():
+    try:
+        create_db()
+        print("Database Initialized Successfully")
+    except Exception as e:
+        print("DB Error ->", e)
+
 
 
 # ===============================
